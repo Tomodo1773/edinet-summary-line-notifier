@@ -6,6 +6,10 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 
 import requests
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_openai import ChatOpenAI
 
 
 # 指定された日付でEDINETから文書一覧を取得する
@@ -76,47 +80,55 @@ def extract_content_from_csv(watchlist_docs):
 
 # chatGPTを使用して財務報告の内容を要約する
 def summarize_financial_reports(content_data, watchlist_doc):
-    # chatGPTで内容を要約する
-    url = "https://api.openai.com/v1/chat/completions"
-    token = os.environ.get("OPENAI_API")
-    system_prompt = (
-        "あなたは20代後半の私の幼馴染のお姉さんです。企業の決算を要約して教えてくれます。「～かしら」「～ね」「～わ」といったお姉さん口調のため口で話します。たまにちょっとからかうようなことも言ってきます。"
+
+    # output parserを設定
+    class Summary(BaseModel):
+        summary: str = Field(description="業績サマリ", max_length=200)
+        macro_factor: str = Field(description="マクロの業績変動要因", max_length=50)
+        market_factor: str = Field(description="市場の業績変動要因", max_length=50)
+        company_factor: str = Field(description="会社の業績変動要因", max_length=50)
+        outlook: str = Field(description="今後の展望", max_length=300)
+
+    parser = JsonOutputParser(pydantic_object=Summary)
+
+    # プロンプトを設定
+    system_prompt = """あなたは20代後半の私の幼馴染のお姉さんです。
+企業の決算を要約して教えてくれます。
+「～かしら」「～ね」「～わ」といったお姉さん口調のため口で話します。
+たまにちょっとからかうようなことも言ってきます。
+"""
+
+    user_prompt = """# 命令文
+{company_name}の決算概要を読み、業績、マクロの業績変動要因、市場の業績変動要因、会社の業績変動要因のサマリと今後の展望を解説してください。
+# 決算概要
+{finance_contents}
+# 出力
+{format_instructions}
+"""
+
+    messages = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            ("human", user_prompt),
+        ],
     )
-    user_pronmpt = (
-        "# 命令文"
-        "あなたは証券アナリストです。{{ 企業名 }}の{{ 会計期間 }}の決算書の内容を読み、業績、マクロの業績変動要因、市場の業績変動要因、会社の業績変動要因のサマリと今後の展望を解説してください。"
-        "# 入力文"
-        f"企業名：{watchlist_doc['filerName']}"
-        f"会計期間：{content_data['quarterly_accounting_period_content']}"
-        "# 出力文"
-        "下記項目とスキーマ、文字数の対応でjson形式で出力してください。"
-        "業績サマリ summary 200文字以内"
-        "マクロの業績変動要因 macro_factor 50文字以内"
-        "市場の業績変動要因 market_factor 50文字以内"
-        "会社の業績変動要因 company_factor 50文字以内"
-        "今後の展望 outlook 300文字以内"
+    template = messages.partial(format_instructions=parser.get_format_instructions())
+
+    # chatモデルを設定
+    chat = ChatOpenAI(model_name="gpt-4-0125-preview", temperature=1, max_tokens=1024).bind(
+        response_format={"type": "json_object"}
     )
-    payload = json.dumps(
+
+    # chainを設定
+    chain = template | chat | parser
+    result = chain.invoke(
         {
-            "model": "gpt-4-1106-preview",
-            "max_tokens": 1024,
-            "temperature": 0.5,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_pronmpt},
-            ],
-            "response_format": {"type": "json_object"},
+            "company_name": watchlist_doc["filerName"],
+            "finance_contents": content_data["quarterly_accounting_period_content"],
         }
     )
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}",
-    }
-    response = requests.request("POST", url, headers=headers, data=payload)
-    response_json = response.json()
-    chat_response_content = response_json["choices"][0]["message"]["content"]
-    chat_response_data = json.loads(chat_response_content)
-    return chat_response_data
+
+    return result
 
 
 # LINE APIを使用して財務サマリーを送信する
@@ -201,11 +213,15 @@ def send_financial_summary(watchlist_doc, content_data, chat_response_data):
 
 
 if __name__ == "__main__":
-    # ウォッチリスト銘柄のシンボルを登録しておく
-    watchlist = ["3050"]
+    # ウォッチリスト銘柄のシンボルを登録しておく（ex. 8001: 伊藤忠商事）
+    watchlist = ["8001"]
 
-    JST = timezone(timedelta(hours=+9))
-    date = datetime.now(JST).strftime("%Y-%m-%d")
+    # 日付設定（本来は当日の日付を設定する想定）
+    # JST = timezone(timedelta(hours=+9))
+    # date = datetime.now(JST).strftime("%Y-%m-%d")
+
+    # 日付設定（テスト用に直近で伊藤忠の決算が出た日を設定）
+    date = "2024-02-14"
 
     edinet_list = get_edinet_list(date)
     print(f"{date}のEDINETリストを取得しました")  # デバッグ用のコメント

@@ -35,7 +35,7 @@ edinet-chatgpt-line-notifierは、EDINETから特定の日付の文書一覧を�
 
 ```none
 EDINET_API= <EDINETのAPI key>
-OPENAI_API= <OpenAIのAPI key>
+OPENAI_API_KEY= <OpenAIのAPI key>
 line_userId= <作成したLINEプロバイダーのユーザID>
 line_token= <作成したLINEチャンネルのtoken>
 ```
