@@ -7,10 +7,10 @@ from datetime import datetime, timedelta, timezone
 from typing import TypedDict
 
 import requests
-from langchain_core.output_parsers import StrOutputParser
+# from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-
-# from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.pydantic_v1 import BaseModel, Field
 # from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
@@ -36,7 +36,7 @@ class WatchlistDoc(TypedDict):
 # content_dataのスキーマ定義
 # ウォッチリスト銘柄のドキュメントのコンテンツに関する情報
 class ContentData(TypedDict):
-    title: str                  # タイトル
+    period: str                  # 決算対象期間
     financial_indicators: str   # 経営指標
     mgmt_analysis: str          # 経営の課題
     mgmt_issues: str            # 経営の分析
@@ -107,6 +107,7 @@ def download_edinet_documents(watchlist_doc: WatchlistDoc):
 # - 「第2【事業の状況】 > 1【事業等のリスク】」(jpcrp_cor:BusinessRisksTextBlock)
 # - 「第2【事業の状況】 > 2【経営者による財政状態、経営成績及びキャッシュ・フローの状況の分析】」(jpcrp_cor:ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock)
 # 有価証券報告書の場合(docTypeCode=120)
+# - 「事業年度、表紙」(jpcrp_cor:FiscalYearCoverPage)
 # - 「第1部【企業情報】 > 第1【企業の概況】 > 1【主要な経営指標等の推移】」(jpcrp_cor:BusinessResultsOfReportingCompanyTextBlock)
 #       ※会社によって章の日本語タイトルは異なる。グループ会社があるかどうか、など
 # - 「第2【事業の状況】 > 1【経営方針、経営環境及び対処すべき課題等】」(jpcrp_cor:BusinessPolicyBusinessEnvironmentIssuesToAddressEtcTextBlock)
@@ -130,12 +131,23 @@ def extract_content_from_csv(watchlist_doc: WatchlistDoc) -> ContentData:
                             == "jpcrp_cor:ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock"
                         ):
                             content_data["mgmt_analysis"] = row[8]
+                        elif row[0] == "jpcrp_cor:BusinessRisksTextBlock":
+                            content_data["business_risks"] = row[8]
                         elif row[0] == "jpcrp_cor:QuarterlyAccountingPeriodCoverPage":
-                            content_data["title"] = row[8]
-                        elif row[0] == "jpcrp_cor:QuarterlyAccountingPeriodCoverPage":
-                            content_data["title"] = row[8]
+                            content_data["period"] = row[8]
                 elif watchlist_doc["docTypeCode"] == "120":
-                    pass
+                    for row in reader:
+                        if (
+                            row[0]
+                            == "jpcrp_cor:ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock"
+                        ):
+                            content_data["mgmt_analysis"] = row[8]
+                        elif row[0] == "jpcrp_cor:BusinessRisksTextBlock":
+                            content_data["business_risks"] = row[8]
+                        elif row[0] == "jpcrp_cor:BusinessPolicyBusinessEnvironmentIssuesToAddressEtcTextBlock":
+                            content_data["mgmt_issues"] = row[8]
+                        elif row[0] == "jpcrp_cor:FiscalYearCoverPage":
+                            content_data["period"] = row[8]
     return content_data
 
 
@@ -143,31 +155,39 @@ def extract_content_from_csv(watchlist_doc: WatchlistDoc) -> ContentData:
 def summarize_financial_reports(content_data: ContentData, watchlist_doc: WatchlistDoc):
 
     # output parserを設定
-    parser = StrOutputParser()
+    class Summary(BaseModel):
+        project_status: str = Field(description="事業の状況", max_length=400)
+        outlook: str = Field(description="次期の見通し", max_length=400)
+        generalize: str = Field(description="総括", max_length=400)
+
+    parser = JsonOutputParser(pydantic_object=Summary)
 
     # プロンプトをロード
     system_prompt = read_file("prompt/system_prompt.txt")
     user_prompt = read_file("prompt/user_prompt.txt")
 
-    prompt = ChatPromptTemplate.from_messages(
+    template = ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
             ("human", user_prompt),
         ],
     )
 
+    prompt = template.partial(format_instructions=parser.get_format_instructions())
+
     # chatモデルを設定
-    # chat = ChatOpenAI(model_name="gpt-4-0125-preview", temperature=1, max_tokens=1024).bind(
-    # response_format={"type": "json_object"}
-    # )
-    chat = ChatAnthropic(model="claude-3-opus-20240229", max_tokens=1045, temperature=0.7)
+    # chat = ChatAnthropic(model="claude-3-opus-20240229", max_tokens=4096, temperature=0.7)
+    chat = ChatAnthropic(model="claude-3-opus-20240229", max_tokens=4096, temperature=0.7)
 
     # chainを設定
     chain = prompt | chat | parser
     result = chain.invoke(
         {
             "company_name": watchlist_doc["filerName"],
-            "finance_contents": content_data["title"],
+            "period": content_data["period"],
+            "mgmt_issues": content_data["mgmt_issues"],
+            "business_risks": content_data["business_risks"],
+            "mgmt_analysis": content_data["mgmt_analysis"]
         }
     )
     return result
@@ -181,13 +201,9 @@ def send_financial_summary(watchlist_doc: WatchlistDoc, content_data: ContentDat
     lineMessageApi = "https://api.line.me/v2/bot/message/push"
     headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json"}
 
-    summary = chat_response_data["summary"]
-    macro_factor = chat_response_data["macro_factor"]
-    market_factor = chat_response_data["market_factor"]
-    company_factor = chat_response_data["company_factor"]
-    outlook = chat_response_data["outlook"]
     content = {
         "type": "bubble",
+        "size": "giga",
         "body": {
             "type": "box",
             "layout": "vertical",
@@ -202,7 +218,7 @@ def send_financial_summary(watchlist_doc: WatchlistDoc, content_data: ContentDat
                 },
                 {
                     "type": "text",
-                    "text": content_data["title"],
+                    "text": content_data["period"],
                     "size": "xs",
                     "color": "#aaaaaa",
                     "wrap": True,
@@ -214,19 +230,14 @@ def send_financial_summary(watchlist_doc: WatchlistDoc, content_data: ContentDat
                     "margin": "xxl",
                     "spacing": "sm",
                     "contents": [
-                        {"type": "text", "text": "業績", "weight": "bold"},
-                        {"type": "text", "text": summary, "wrap": True},
+                        {"type": "text", "text": "事業の状況", "weight": "bold"},
+                        {"type": "text", "text": chat_response_data["project_status"], "wrap": True},
                         {"type": "separator", "margin": "xxl"},
-                        {"type": "text", "text": "業績変動要因", "weight": "bold", "margin": "none"},
-                        {"type": "text", "text": "- マクロ"},
-                        {"type": "text", "text": macro_factor, "wrap": True},
-                        {"type": "text", "text": "- 業界"},
-                        {"type": "text", "text": market_factor, "wrap": True},
-                        {"type": "text", "text": "- 会社"},
-                        {"type": "text", "text": company_factor, "wrap": True},
+                        {"type": "text", "text": "次期の見通し", "weight": "bold"},
+                        {"type": "text", "text": chat_response_data["outlook"], "wrap": True},
                         {"type": "separator", "margin": "xxl"},
-                        {"type": "text", "text": "今後の展望", "weight": "bold"},
-                        {"type": "text", "text": outlook, "wrap": True},
+                        {"type": "text", "text": "総括", "weight": "bold"},
+                        {"type": "text", "text":chat_response_data["generalize"], "wrap": True},
                     ],
                 },
             ],
@@ -256,14 +267,15 @@ def send_financial_summary(watchlist_doc: WatchlistDoc, content_data: ContentDat
 
 if __name__ == "__main__":
     # ウォッチリスト銘柄のシンボルを登録しておく（ex. 8001: 伊藤忠商事）
-    watchlist = ["8001"]
+    watchlist = ["2163"]
 
     # 日付設定（本来は当日の日付を設定する想定）
     # JST = timezone(timedelta(hours=+9))
     # date = datetime.now(JST).strftime("%Y-%m-%d")
 
     # 日付設定（テスト用に直近で伊藤忠の決算が出た日を設定）
-    date = "2023-06-22"
+    # date = "2023-06-22"
+    date = "2024-04-25"
 
     edinet_list = get_edinet_list(date)
     print(f"{date}のEDINETリストを取得しました")  # デバッグ用のコメント
@@ -282,7 +294,7 @@ if __name__ == "__main__":
         content_data = extract_content_from_csv(watchlist_doc)
         print(f"{watchlist_doc['filerName']} >> CSVからコンテンツデータを抽出しました。")  # デバッグ用のコメント
 
-        print(f"{watchlist_doc['filerName']} >> chatGPTで要約を取得します...")
+        print(f"{watchlist_doc['filerName']} >> 生成AIで要約を取得します...")
         chat_response_data = summarize_financial_reports(content_data, watchlist_doc)
         print(f"{watchlist_doc['filerName']} >> 財務報告の要約を取得しました。")  # デバッグ用のコメント
 
