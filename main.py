@@ -6,11 +6,31 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 
 import requests
-from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.pydantic_v1 import BaseModel, Field
-from langchain_openai import ChatOpenAI
+# from langchain_core.pydantic_v1 import BaseModel, Field
+# from langchain_openai import ChatOpenAI
+from dotenv import load_dotenv
+from langchain_anthropic import ChatAnthropic
+from langsmith import Client
 
+load_dotenv()
+
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
+os.environ["LANGCHAIN_PROJECT"] = "Finance"
+
+client = Client()
+
+
+def read_file(file_path):
+    try:
+        with open(file_path, "r", encoding="utf-8") as file:
+            return file.read()
+    except FileNotFoundError:
+        return "ファイルが見つかりませんでした。"
+    except Exception as e:
+        return f"ファイルの読み込み中にエラーが発生しました: {str(e)}"
 
 # 指定された日付でEDINETから文書一覧を取得する
 def get_edinet_list(date):
@@ -58,6 +78,8 @@ def download_edinet_documents(watchlist_docs):
 
 
 # ダウンロードした文書から必要な情報をCSVファイルから抽出する
+# 半期決算/四半期決算の時は
+# 
 def extract_content_from_csv(watchlist_docs):
     content_data = {}
     filer_name_dir = os.path.join("documents", watchlist_docs["filerName"])
@@ -82,59 +104,40 @@ def extract_content_from_csv(watchlist_docs):
 def summarize_financial_reports(content_data, watchlist_doc):
 
     # output parserを設定
-    class Summary(BaseModel):
-        summary: str = Field(description="業績サマリ", max_length=200)
-        macro_factor: str = Field(description="マクロの業績変動要因", max_length=50)
-        market_factor: str = Field(description="市場の業績変動要因", max_length=50)
-        company_factor: str = Field(description="会社の業績変動要因", max_length=50)
-        outlook: str = Field(description="今後の展望", max_length=300)
+    parser = StrOutputParser()
 
-    parser = JsonOutputParser(pydantic_object=Summary)
+    # プロンプトをロード
+    system_prompt = read_file("prompt/system_prompt.txt")
+    user_prompt = read_file("prompt/user_prompt.txt")
 
-    # プロンプトを設定
-    system_prompt = """あなたは20代後半の私の幼馴染のお姉さんです。
-企業の決算を要約して教えてくれます。
-「～かしら」「～ね」「～わ」といったお姉さん口調のため口で話します。
-たまにちょっとからかうようなことも言ってきます。
-"""
-
-    user_prompt = """# 命令文
-{company_name}の決算概要を読み、業績、マクロの業績変動要因、市場の業績変動要因、会社の業績変動要因のサマリと今後の展望を解説してください。
-# 決算概要
-{finance_contents}
-# 出力
-{format_instructions}
-"""
-
-    messages = ChatPromptTemplate.from_messages(
+    prompt = ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
             ("human", user_prompt),
         ],
     )
-    template = messages.partial(format_instructions=parser.get_format_instructions())
 
     # chatモデルを設定
-    chat = ChatOpenAI(model_name="gpt-4-0125-preview", temperature=1, max_tokens=1024).bind(
-        response_format={"type": "json_object"}
-    )
+    # chat = ChatOpenAI(model_name="gpt-4-0125-preview", temperature=1, max_tokens=1024).bind(
+        # response_format={"type": "json_object"}
+    # )
+    chat = ChatAnthropic(model="claude-3-opus-20240229", max_tokens=1045, temperature=0.7)
 
     # chainを設定
-    chain = template | chat | parser
+    chain = prompt | chat | parser
     result = chain.invoke(
         {
             "company_name": watchlist_doc["filerName"],
             "finance_contents": content_data["quarterly_accounting_period_content"],
         }
     )
-
     return result
 
 
 # LINE APIを使用して財務サマリーを送信する
 def send_financial_summary(watchlist_doc, content_data, chat_response_data):
-    token = os.environ.get("line_token")
-    userId = os.environ.get("line_userId")
+    token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+    userId = os.environ.get("LINE_USER_ID")
 
     lineMessageApi = "https://api.line.me/v2/bot/message/push"
     headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json"}

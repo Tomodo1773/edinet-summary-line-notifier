@@ -1,3 +1,6 @@
 requests
-langchain
-langchain-openai
+langchain-core
+# langchain-openai
+azure-functions
+python-dotenv
+langchain-anthropic

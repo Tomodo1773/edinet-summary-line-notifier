@@ -36,8 +36,8 @@ edinet-chatgpt-line-notifierは、EDINETから特定の日付の文書一覧を�
 ```none
 EDINET_API= <EDINETのAPI key>
 OPENAI_API_KEY= <OpenAIのAPI key>
-line_userId= <作成したLINEプロバイダーのユーザID>
-line_token= <作成したLINEチャンネルのtoken>
+LINE_USER_ID= <作成したLINEプロバイダーのユーザID>
+LINE_CHANNEL_ACCESS_TOKEN= <作成したLINEチャンネルのtoken>
 ```
 
 3. `main.py` スクリプトを実行して、EDINETから文書をダウンロードし、財務サマリーをLINEに送信します。
