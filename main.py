@@ -4,10 +4,12 @@ import json
 import os
 import zipfile
 from datetime import datetime, timedelta, timezone
+from typing import TypedDict
 
 import requests
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+
 # from langchain_core.pydantic_v1 import BaseModel, Field
 # from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
@@ -23,6 +25,24 @@ os.environ["LANGCHAIN_PROJECT"] = "Finance"
 client = Client()
 
 
+# watchlist_docのスキーマ定義
+# EDINETのドキュメント一覧から取得したウォッチリスト銘柄のドキュメントに関する情報
+class WatchlistDoc(TypedDict):
+    secCode: str        # 企業シンボル
+    filerName: str      # 企業名
+    docID: str          # 文書ID
+    docTypeCode: str    # 文書種別
+
+# content_dataのスキーマ定義
+# ウォッチリスト銘柄のドキュメントのコンテンツに関する情報
+class ContentData(TypedDict):
+    title: str                  # タイトル
+    financial_indicators: str   # 経営指標
+    mgmt_analysis: str          # 経営の課題
+    mgmt_issues: str            # 経営の分析
+    business_risks: str         # 事業リスク
+
+
 def read_file(file_path):
     try:
         with open(file_path, "r", encoding="utf-8") as file:
@@ -31,6 +51,7 @@ def read_file(file_path):
         return "ファイルが見つかりませんでした。"
     except Exception as e:
         return f"ファイルの読み込み中にエラーが発生しました: {str(e)}"
+
 
 # 指定された日付でEDINETから文書一覧を取得する
 def get_edinet_list(date):
@@ -41,27 +62,30 @@ def get_edinet_list(date):
 
 
 # EDINETリストから特定のシンボルリストに一致する文書をフィルタリングする
-def filter_edinet_list(EDINET_LIST, symbol_list):
-    watchlist_docs = []
+# 120: 有価証券報告書
+# 140: 四半期決算報告書
+# 160: 半期決算報告書
+def filter_edinet_list(EDINET_LIST, symbol_list) -> list[WatchlistDoc]:
+    watchlist_docs: list[WatchlistDoc] = []
     for result in EDINET_LIST["results"]:
         if result["secCode"] and result["secCode"][:-1] in symbol_list:
-            if result["docTypeCode"] in ["140", "160"]:
+            if result["docTypeCode"] in ["120", "140", "160"]:
                 watchlist_docs.append(
                     {
-                        "secCode": result["secCode"][:-1],
-                        "filerName": result["filerName"],
-                        "docID": result["docID"],
-                        "docTypeCode": result["docTypeCode"],
+                        "secCode": result["secCode"][:-1],      # 企業シンボル
+                        "filerName": result["filerName"],       # 企業名
+                        "docID": result["docID"],               # 文書ID
+                        "docTypeCode": result["docTypeCode"],   # 文書種別
                     }
                 )
     return watchlist_docs
 
 
 # EDINETから指定された文書IDの文書をダウンロードする
-def download_edinet_documents(watchlist_docs):
+def download_edinet_documents(watchlist_doc: WatchlistDoc):
     api_key = os.environ.get("EDINET_API")
-    docID = watchlist_docs["docID"]
-    filer_name_dir = os.path.join("documents", watchlist_docs["filerName"])
+    docID = watchlist_doc["docID"]
+    filer_name_dir = os.path.join("documents", watchlist_doc["filerName"])
     os.makedirs(filer_name_dir, exist_ok=True)
     # EDINETからpdfを取得
     url = f"https://api.edinet-fsa.go.jp/api/v2/documents/{docID}?type=2&Subscription-Key={api_key}"
@@ -78,30 +102,45 @@ def download_edinet_documents(watchlist_docs):
 
 
 # ダウンロードした文書から必要な情報をCSVファイルから抽出する
-# 半期決算/四半期決算の時は
-# 
-def extract_content_from_csv(watchlist_docs):
-    content_data = {}
-    filer_name_dir = os.path.join("documents", watchlist_docs["filerName"])
+# 半期決算/四半期決算の場合(docTypeCode=140,160)
+# - 「四半期会計期間、表紙」(jpcrp_cor:QuarterlyAccountingPeriodCoverPage)
+# - 「第2【事業の状況】 > 1【事業等のリスク】」(jpcrp_cor:BusinessRisksTextBlock)
+# - 「第2【事業の状況】 > 2【経営者による財政状態、経営成績及びキャッシュ・フローの状況の分析】」(jpcrp_cor:ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock)
+# 有価証券報告書の場合(docTypeCode=120)
+# - 「第1部【企業情報】 > 第1【企業の概況】 > 1【主要な経営指標等の推移】」(jpcrp_cor:BusinessResultsOfReportingCompanyTextBlock)
+#       ※会社によって章の日本語タイトルは異なる。グループ会社があるかどうか、など
+# - 「第2【事業の状況】 > 1【経営方針、経営環境及び対処すべき課題等】」(jpcrp_cor:BusinessPolicyBusinessEnvironmentIssuesToAddressEtcTextBlock)
+# - 「第2【事業の状況】 > 3【事業等のリスク】」(jpcrp_cor:BusinessRisksTextBlock)
+# - 「第2【事業の状況】 > 4【経営者による財政状態、経営成績及びキャッシュ・フローの状況の分析】」(jpcrp_cor:ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock)
+
+def extract_content_from_csv(watchlist_doc: WatchlistDoc) -> ContentData:
+    content_data: ContentData = {}
+    filer_name_dir = os.path.join("documents", watchlist_doc["filerName"])
     # 解凍したzipのXBRL_TO_CSVフォルダ内のjpcrpから始まるcsvファイルを解析する
     for file in os.listdir(os.path.join(filer_name_dir, "XBRL_TO_CSV")):
         if file.startswith("jpcrp") and file.endswith(".csv"):
             csv_path = os.path.join(filer_name_dir, "XBRL_TO_CSV", file)
             with open(csv_path, "r", encoding="utf-16") as csv_file:
                 reader = csv.reader(csv_file, delimiter="\t")
-                for row in reader:
-                    if (
-                        row[0]
-                        == "jpcrp_cor:ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock"
-                    ):
-                        content_data["management_analysis_content"] = row[8]
-                    elif row[0] == "jpcrp_cor:QuarterlyAccountingPeriodCoverPage":
-                        content_data["quarterly_accounting_period_content"] = row[8]
+
+                if watchlist_doc["docTypeCode"] in ["140", "160"]:
+                    for row in reader:
+                        if (
+                            row[0]
+                            == "jpcrp_cor:ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock"
+                        ):
+                            content_data["mgmt_analysis"] = row[8]
+                        elif row[0] == "jpcrp_cor:QuarterlyAccountingPeriodCoverPage":
+                            content_data["title"] = row[8]
+                        elif row[0] == "jpcrp_cor:QuarterlyAccountingPeriodCoverPage":
+                            content_data["title"] = row[8]
+                elif watchlist_doc["docTypeCode"] == "120":
+                    pass
     return content_data
 
 
 # chatGPTを使用して財務報告の内容を要約する
-def summarize_financial_reports(content_data, watchlist_doc):
+def summarize_financial_reports(content_data: ContentData, watchlist_doc: WatchlistDoc):
 
     # output parserを設定
     parser = StrOutputParser()
@@ -119,7 +158,7 @@ def summarize_financial_reports(content_data, watchlist_doc):
 
     # chatモデルを設定
     # chat = ChatOpenAI(model_name="gpt-4-0125-preview", temperature=1, max_tokens=1024).bind(
-        # response_format={"type": "json_object"}
+    # response_format={"type": "json_object"}
     # )
     chat = ChatAnthropic(model="claude-3-opus-20240229", max_tokens=1045, temperature=0.7)
 
@@ -128,14 +167,14 @@ def summarize_financial_reports(content_data, watchlist_doc):
     result = chain.invoke(
         {
             "company_name": watchlist_doc["filerName"],
-            "finance_contents": content_data["quarterly_accounting_period_content"],
+            "finance_contents": content_data["title"],
         }
     )
     return result
 
 
 # LINE APIを使用して財務サマリーを送信する
-def send_financial_summary(watchlist_doc, content_data, chat_response_data):
+def send_financial_summary(watchlist_doc: WatchlistDoc, content_data: ContentData, chat_response_data):
     token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     userId = os.environ.get("LINE_USER_ID")
 
@@ -163,7 +202,7 @@ def send_financial_summary(watchlist_doc, content_data, chat_response_data):
                 },
                 {
                     "type": "text",
-                    "text": content_data["quarterly_accounting_period_content"],
+                    "text": content_data["title"],
                     "size": "xs",
                     "color": "#aaaaaa",
                     "wrap": True,
@@ -224,7 +263,7 @@ if __name__ == "__main__":
     # date = datetime.now(JST).strftime("%Y-%m-%d")
 
     # 日付設定（テスト用に直近で伊藤忠の決算が出た日を設定）
-    date = "2024-02-14"
+    date = "2023-06-22"
 
     edinet_list = get_edinet_list(date)
     print(f"{date}のEDINETリストを取得しました")  # デバッグ用のコメント
