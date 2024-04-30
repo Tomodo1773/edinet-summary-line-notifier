@@ -1,5 +1,6 @@
 import logging
 import azure.functions as func
+from functions.finance_summary import finance_summary
 
 app = func.FunctionApp()
 
@@ -9,3 +10,4 @@ def notify_finance_summary(myTimer: func.TimerRequest) -> None:
         logging.info('The timer is past due!')
 
     logging.info('Python timer trigger function executed.')
+    finance_summary()
