@@ -1,7 +1,9 @@
 import csv
 import io
 import json
+import logging
 import os
+import shutil
 import zipfile
 
 import requests
@@ -43,11 +45,11 @@ def download_edinet_documents(watchlist_doc: WatchlistDoc):
     docID = watchlist_doc["docID"]
     filer_name_dir = os.path.join("documents", watchlist_doc["filerName"])
     os.makedirs(filer_name_dir, exist_ok=True)
-    # EDINETからpdfを取得
-    url = f"https://api.edinet-fsa.go.jp/api/v2/documents/{docID}?type=2&Subscription-Key={api_key}"
-    response = requests.request("GET", url)
-    with open(os.path.join(filer_name_dir, f"{docID}.pdf"), "wb") as f:
-        f.write(response.content)
+    # # EDINETからpdfを取得
+    # url = f"https://api.edinet-fsa.go.jp/api/v2/documents/{docID}?type=2&Subscription-Key={api_key}"
+    # response = requests.request("GET", url)
+    # with open(os.path.join(filer_name_dir, f"{docID}.pdf"), "wb") as f:
+    #     f.write(response.content)
     # EDINETからzipを取得
     url = f"https://api.edinet-fsa.go.jp/api/v2/documents/{docID}?type=5&Subscription-Key={api_key}"
     response = requests.request("GET", url)
@@ -106,3 +108,16 @@ def extract_content_from_csv(watchlist_doc: WatchlistDoc) -> ContentData:
                         elif row[0] == "jpcrp_cor:FiscalYearCoverPage":
                             content_data["period"] = row[8]
     return content_data
+
+
+def delete_document_folder():
+    folder_path = os.path.join("documents")
+    try:
+        shutil.rmtree(folder_path)
+        logging.info("ダウンロードファイルが正常に削除されました。")
+    except Exception as e:
+        logging.error(f"ダウンロードファイルの削除中にエラーが発生しました: {e}")
+
+
+if __name__ == "__main__":
+    delete_document_folder()

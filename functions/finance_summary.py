@@ -10,6 +10,7 @@ from utils.edinet import (
     extract_content_from_csv,
     filter_edinet_list,
     get_edinet_list,
+    delete_document_folder,
 )
 from utils.line import send_financial_summary
 from utils.llm import summarize_financial_reports
@@ -60,3 +61,5 @@ def finance_summary():
 
         send_financial_summary(watchlist_doc, content_data, chat_response_data)
         logging.info(f"{watchlist_doc['filerName']} >> 財務サマリーをLINEに送信しました。")  # デバッグ用のコメント
+    
+    delete_document_folder()
