@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -21,21 +22,6 @@ os.environ["LANGCHAIN_PROJECT"] = "Finance"
 
 client = Client()
 
-import logging
-
-
-def setup_logger():
-    logger = logging.getLogger(__name__)
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-    return logger
-
-
-logger = setup_logger()
-
 def finance_summary():
     # ウォッチリスト銘柄のシンボルを登録しておく（ex. 8001: 伊藤忠商事）
     watchlist = ["2163"]
@@ -49,25 +35,25 @@ def finance_summary():
     date = "2024-04-25"
 
     edinet_list = get_edinet_list(date)
-    logger.info(f"{date}のEDINETリストを取得しました")  # デバッグ用のコメント
+    logging.info(f"{date}のEDINETリストを取得しました")  # デバッグ用のコメント
     watchlist_docs = filter_edinet_list(edinet_list, watchlist)
     if not watchlist_docs:
-        logger.info("ウォッチリストの報告書はありませんでした。処理を終了します。")
+        logging.info("ウォッチリストの報告書はありませんでした。処理を終了します。")
         exit()
     else:
-        logger.info("ウォッチリストの報告書が新規アップロードされています。後続の処理を実行します。")
-        # watchlist_docのfilerNameの値のみloggerで出力する
-        logger.info(f"対象銘柄: {[watchlist_doc['filerName'] for watchlist_doc in watchlist_docs]}")
+        logging.info("ウォッチリストの報告書が新規アップロードされています。後続の処理を実行します。")
+        # watchlist_docのfilerNameの値のみloggingで出力する
+        logging.info(f"対象銘柄: {[watchlist_doc['filerName'] for watchlist_doc in watchlist_docs]}")
 
     for watchlist_doc in watchlist_docs:
         download_edinet_documents(watchlist_doc)
-        logger.info(f"{watchlist_doc['filerName']} >> ドキュメントをダウンロードしました。")  # デバッグ用のコメント
+        logging.info(f"{watchlist_doc['filerName']} >> ドキュメントをダウンロードしました。")  # デバッグ用のコメント
         content_data = extract_content_from_csv(watchlist_doc)
-        logger.info(f"{watchlist_doc['filerName']} >> CSVからコンテンツデータを抽出しました。")  # デバッグ用のコメント
+        logging.info(f"{watchlist_doc['filerName']} >> CSVからコンテンツデータを抽出しました。")  # デバッグ用のコメント
 
-        logger.info(f"{watchlist_doc['filerName']} >> 生成AIで要約を取得します...")
+        logging.info(f"{watchlist_doc['filerName']} >> 生成AIで要約を取得します...")
         chat_response_data = summarize_financial_reports(content_data, watchlist_doc)
-        logger.info(f"{watchlist_doc['filerName']} >> 財務報告の要約を取得しました。")  # デバッグ用のコメント
+        logging.info(f"{watchlist_doc['filerName']} >> 財務報告の要約を取得しました。")  # デバッグ用のコメント
 
         send_financial_summary(watchlist_doc, content_data, chat_response_data)
-        logger.info(f"{watchlist_doc['filerName']} >> 財務サマリーをLINEに送信しました。")  # デバッグ用のコメント
+        logging.info(f"{watchlist_doc['filerName']} >> 財務サマリーをLINEに送信しました。")  # デバッグ用のコメント
