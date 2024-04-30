@@ -7,13 +7,15 @@ from datetime import datetime, timedelta, timezone
 from typing import TypedDict
 
 import requests
-# from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.pydantic_v1 import BaseModel, Field
+
 # from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
+from langchain_core.output_parsers import JsonOutputParser
+
+# from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.pydantic_v1 import BaseModel, Field
 from langsmith import Client
 
 load_dotenv()
@@ -28,19 +30,20 @@ client = Client()
 # watchlist_docのスキーマ定義
 # EDINETのドキュメント一覧から取得したウォッチリスト銘柄のドキュメントに関する情報
 class WatchlistDoc(TypedDict):
-    secCode: str        # 企業シンボル
-    filerName: str      # 企業名
-    docID: str          # 文書ID
-    docTypeCode: str    # 文書種別
+    secCode: str  # 企業シンボル
+    filerName: str  # 企業名
+    docID: str  # 文書ID
+    docTypeCode: str  # 文書種別
+
 
 # content_dataのスキーマ定義
 # ウォッチリスト銘柄のドキュメントのコンテンツに関する情報
 class ContentData(TypedDict):
-    period: str                  # 決算対象期間
-    financial_indicators: str   # 経営指標
-    mgmt_analysis: str          # 経営の課題
-    mgmt_issues: str            # 経営の分析
-    business_risks: str         # 事業リスク
+    period: str  # 決算対象期間
+    financial_indicators: str  # 経営指標
+    mgmt_analysis: str  # 経営の課題
+    mgmt_issues: str  # 経営の分析
+    business_risks: str  # 事業リスク
 
 
 def read_file(file_path):
@@ -72,10 +75,10 @@ def filter_edinet_list(EDINET_LIST, symbol_list) -> list[WatchlistDoc]:
             if result["docTypeCode"] in ["120", "140", "160"]:
                 watchlist_docs.append(
                     {
-                        "secCode": result["secCode"][:-1],      # 企業シンボル
-                        "filerName": result["filerName"],       # 企業名
-                        "docID": result["docID"],               # 文書ID
-                        "docTypeCode": result["docTypeCode"],   # 文書種別
+                        "secCode": result["secCode"][:-1],  # 企業シンボル
+                        "filerName": result["filerName"],  # 企業名
+                        "docID": result["docID"],  # 文書ID
+                        "docTypeCode": result["docTypeCode"],  # 文書種別
                     }
                 )
     return watchlist_docs
@@ -113,6 +116,7 @@ def download_edinet_documents(watchlist_doc: WatchlistDoc):
 # - 「第2【事業の状況】 > 1【経営方針、経営環境及び対処すべき課題等】」(jpcrp_cor:BusinessPolicyBusinessEnvironmentIssuesToAddressEtcTextBlock)
 # - 「第2【事業の状況】 > 3【事業等のリスク】」(jpcrp_cor:BusinessRisksTextBlock)
 # - 「第2【事業の状況】 > 4【経営者による財政状態、経営成績及びキャッシュ・フローの状況の分析】」(jpcrp_cor:ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock)
+
 
 def extract_content_from_csv(watchlist_doc: WatchlistDoc) -> ContentData:
     content_data: ContentData = {}
@@ -187,7 +191,7 @@ def summarize_financial_reports(content_data: ContentData, watchlist_doc: Watchl
             "period": content_data["period"],
             "mgmt_issues": content_data["mgmt_issues"],
             "business_risks": content_data["business_risks"],
-            "mgmt_analysis": content_data["mgmt_analysis"]
+            "mgmt_analysis": content_data["mgmt_analysis"],
         }
     )
     return result
