@@ -1,75 +1,80 @@
 # edinet-chatgpt-line-notifier
 
-edinet-chatgpt-line-notifierは、EDINETから特定の日付の文書一覧を取得し、特定のシンボルリストに一致する文書をフィルタリングしてダウンロードするPythonスクリプトです。さらに、ダウンロードした文書から必要な情報を抽出し、chatGPTを使用して財務報告の内容を要約し、LINE Messaging APIを介して財務サマリーを送信します。
+## プロジェクト概要
 
-下記記事に解説記事を書いています。コードの解説についてはこちらのほうが詳細に書いています。
+このプロジェクトは、EDINETから決算報告書を取得し、ChatGPTを使用して要約を生成し、LINEに通知するシステムです。ウォッチリストに登録された企業の決算報告書が新しくアップロードされた際に、自動的に処理が実行されます。
 
-[【My秘書】chatGPT×EDINET×LINEで保有銘柄の決算要約してくれるお姉さん](https://zenn.dev/tomodo_ysys/articles/edinet-chatgpt-financial-report)
+## 主な機能
 
-## 特徴
+- EDINETから指定日の報告書一覧を取得
+- ウォッチリストの企業の報告書を抽出
+- 報告書をダウンロードし、必要な情報をCSVから抽出
+- 抽出した情報をAIで要約
+- 要約した決算情報をLINEメッセージとして送信
 
-- EDINETから特定の日付の文書一覧を取得
-- ウォッチリストに登録された銘柄コードに基づいて文書をフィルタリング
-- ダウンロードした文書から財務情報を抽出
-- chatGPTを使用して財務報告の内容を要約
-- LINE Messaging APIを通じて財務サマリーを送信
+## 使用技術
 
-## 注意事項
+- Python
+- Azure Functions
+- EDINET API
+- LINE Messaging API
+- Anthropic API (Claude)
 
-- EDINETから取得するドキュメントは半期報告書、四半期報告書のみです。
-- chatGPTやLINE通知ではお姉さん風のキャラ付けがされています。
+## フォルダ構成とファイルの説明
 
-## 前提条件
-
-- OpenAI API Keyが取得済みであること。
-- EDINET API Keyが取得済みであること。
-- LINE Messaging APIのプロバイダーおよびチャンネルを作成していること。
-- LINE投稿用のtokenを取得していること。
-
-## セットアップ
-
-1. `.env.sample` ファイルをコピーして `.env` ファイルを作成します。
-2. `.env` ファイルに必要なAPIキーとトークンを設定します。
-
-下記を参考にAPIキー、トークンを設定してください。
-
-```none
-EDINET_API= <EDINETのAPI key>
-OPENAI_API_KEY= <OpenAIのAPI key>
-line_userId= <作成したLINEプロバイダーのユーザID>
-line_token= <作成したLINEチャンネルのtoken>
+```bash
+- edinet-chatgpt-line-notifier/
+  - .vscode/
+  - functions/
+    - finance_summary.py: 決算報告書の取得、要約、LINE通知の主要ロジックが含まれる
+  - function_app.py: Azure Functionsのエントリーポイント
+  - prompt.py: ChatGPTへのプロンプトを定義
+  - requirements.txt: 必要なPythonパッケージを記載
+  - sample/
+  - schema.py: データ構造を定義
+  - utils/
+    - edinet.py: EDINETからの決算報告書の取得に関する関数群
+    - get_watchlist.py: ウォッチリストの取得に関する関数
+    - line.py: LINEへの通知に関する関数
+    - llm.py: ChatGPTを使用した要約に関する関数
 ```
 
-3. `main.py` スクリプトを実行して、EDINETから文書をダウンロードし、財務サマリーをLINEに送信します。
+## インストール方法
+
+### 前提条件
+
+- Python 3.9以上
+- Azure Functionsのアカウント
+- LINE Developersのアカウント
+- Anthropic APIのアカウント
+
+### 手順
+
+1. このリポジトリをクローン
+2. 必要なPythonパッケージをインストール
+
+```bash
+pip install -r requirements.txt
+```
+
+3. 環境変数を設定
+
+- EDINET_API: EDINETのAPIキー
+- LINE_CHANNEL_ACCESS_TOKEN: LINEチャネルのアクセストークン
+- LINE_USER_ID: 通知先のLINEユーザーID
+- TOMOSTOCK_USERID: ウォッチリスト取得用のユーザーID
+- TOMOSTOCK_PASSWORD: ウォッチリスト取得用のパスワード
+
+4. Azure Functionsにデプロイ
+
+5. Azure Functionsのスケジュールを設定
 
 ## 使用方法
 
-1. ウォッチリストに監視したい銘柄コードを追加します。
-
-main.pyの205行目に設定箇所があります。
-
-```python
-    # ウォッチリスト銘柄のシンボルを登録しておく
-    watchlist = ["3050"]
-```
-
-2. `main.py` を実行して、プロセスを開始します。
-3. LINEで財務サマリーを受け取ります。
-
-## リファレンス
-
-[EDINET -操作ガイド-](https://disclosure2dl.edinet-fsa.go.jp/guide/static/disclosure/WZEK0110.html)
-
-[OpenAI API Reference](https://platform.openai.com/docs/overview)
+1. ウォッチリストに企業シンボルを登録 (utils/get_watchlist.py)
+2. Azure Functionsのタイマートリガーにより、毎日20時に自動実行
+3. ウォッチリスト企業の決算報告書が新しくアップロードされていた場合、要約してLINEに通知
 
 ## ライセンス
 
-このプロジェクトはMITライセンスのもとで公開されています。詳細は `LICENSE` ファイルを参照してください。
-
-## 貢献
-
-バグの報告、新機能の提案、プルリクエストなどはGitHubのissueやプルリクエストを通じて歓迎します。
-
-## サポート
-
-使用方法に関する質問やサポートが必要な場合は、GitHubのissueを通じてお問い合わせください。
+ライセンスはMITライセンスです。
