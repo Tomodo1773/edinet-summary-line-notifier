@@ -26,7 +26,8 @@ client = Client()
 
 def finance_summary():
     # ウォッチリスト銘柄のシンボルを登録しておく（ex. 8001: 伊藤忠商事）
-    # watchlist = ["2163"]
+    # 本コードではget_watchlistを用いてTomoStockからシンボルリストを取得しているが適宜変更
+    # ex) watchlist = ["2163"]
     watchlist = get_watchlist()
     logging.info(f"ウォッチリストを取得しました: {watchlist}")  # デバッグ用のコメント
 
