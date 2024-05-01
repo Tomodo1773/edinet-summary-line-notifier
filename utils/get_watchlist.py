@@ -36,8 +36,8 @@ def send_stockinfo_request(token):
     url = "https://tomostock.azurewebsites.net/api/stockinfo"
 
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
-    data = json.dumps({"type": "日本株"})
-    response = requests.get(url, headers=headers, data=data)
+    params = {"type": "日本株"}
+    response = requests.get(url, headers=headers, params=params)
 
     if response.status_code == 200:
         logging.info("銘柄情報APIの呼び出しに成功しました。")
