@@ -33,7 +33,7 @@ def call_login():
 
 
 def send_stockinfo_request(token):
-    url = "https://tomostock.azurewebsites.net/api/stockinfo"
+    url = "https://tomostocks.azurewebsites.net/api/stockinfo"
 
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
     params = {"type": "日本株"}
